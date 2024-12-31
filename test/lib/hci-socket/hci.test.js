@@ -9,7 +9,7 @@ describe('hci-socket hci', () => {
   const Socket = sinon.stub();
 
   const Hci = proxyquire('../../../lib/hci-socket/hci', {
-    '@abandonware/bluetooth-hci-socket': Socket
+    '@stoprocent/bluetooth-hci-socket': Socket
   });
 
   let hci;
@@ -22,6 +22,7 @@ describe('hci-socket hci', () => {
     Socket.prototype.isDevUp = sinon.stub();
     Socket.prototype.removeAllListeners = sinon.stub();
     Socket.prototype.setFilter = sinon.stub();
+    Socket.prototype.setAddress = sinon.stub();
     Socket.prototype.write = sinon.stub();
 
     hci = new Hci({});
@@ -39,11 +40,12 @@ describe('hci-socket hci', () => {
       hci._userChannel = 'userChannel';
       hci.init();
 
-      assert.callCount(hci._socket.on, 2);
+      assert.callCount(hci._socket.on, 3);
       assert.calledWithMatch(hci._socket.on, 'data', sinon.match.func);
       assert.calledWithMatch(hci._socket.on, 'error', sinon.match.func);
+      assert.calledWithMatch(hci._socket.on, 'state', sinon.match.func);
 
-      assert.calledOnceWithExactly(hci._socket.bindUser, deviceId);
+      assert.calledOnceWithExactly(hci._socket.bindUser, deviceId, undefined);
       assert.calledOnceWithExactly(hci._socket.start);
 
       assert.calledOnceWithExactly(hci.reset);
@@ -56,11 +58,12 @@ describe('hci-socket hci', () => {
       hci._bound = false;
       hci.init();
 
-      assert.callCount(hci._socket.on, 2);
+      assert.callCount(hci._socket.on, 3);
       assert.calledWithMatch(hci._socket.on, 'data', sinon.match.func);
       assert.calledWithMatch(hci._socket.on, 'error', sinon.match.func);
+      assert.calledWithMatch(hci._socket.on, 'state', sinon.match.func);
 
-      assert.calledOnceWithExactly(hci._socket.bindRaw, deviceId);
+      assert.calledOnceWithExactly(hci._socket.bindRaw, deviceId, undefined);
       assert.calledOnceWithExactly(hci._socket.start);
 
       assert.calledOnceWithExactly(hci.pollIsDevUp);
@@ -75,9 +78,10 @@ describe('hci-socket hci', () => {
       hci._bound = true;
       hci.init();
 
-      assert.callCount(hci._socket.on, 2);
+      assert.callCount(hci._socket.on, 3);
       assert.calledWithMatch(hci._socket.on, 'data', sinon.match.func);
       assert.calledWithMatch(hci._socket.on, 'error', sinon.match.func);
+      assert.calledWithMatch(hci._socket.on, 'state', sinon.match.func);
 
       assert.notCalled(hci._socket.bindRaw);
       assert.calledOnceWithExactly(hci._socket.start);
@@ -105,6 +109,7 @@ describe('hci-socket hci', () => {
       hci.readLeBufferSize = sinon.spy();
       hci.readBdAddr = sinon.spy();
       hci.init = sinon.spy();
+      hci.readLeSupportedFeatures = sinon.spy();
       hci.setCodedPhySupport = sinon.spy();
 
       hci.on('stateChange', callback);
@@ -166,13 +171,7 @@ describe('hci-socket hci', () => {
       hci.pollIsDevUp();
 
       assert.calledOnceWithExactly(hci.setSocketFilter);
-      assert.calledOnceWithExactly(hci.setEventMask);
-      assert.calledOnceWithExactly(hci.setLeEventMask);
-      assert.calledOnceWithExactly(hci.readLocalVersion);
-      assert.calledOnceWithExactly(hci.writeLeHostSupported);
-      assert.calledOnceWithExactly(hci.readLeHostSupported);
-      assert.calledOnceWithExactly(hci.readLeBufferSize);
-      assert.calledOnceWithExactly(hci.readBdAddr);
+      assert.calledOnceWithExactly(hci.readLeSupportedFeatures);
 
       assert.notCalled(hci.setCodedPhySupport);
       assert.notCalled(hci._socket.removeAllListeners);
@@ -189,14 +188,7 @@ describe('hci-socket hci', () => {
       hci.pollIsDevUp();
 
       assert.calledOnceWithExactly(hci.setSocketFilter);
-      assert.calledOnceWithExactly(hci.setEventMask);
-      assert.calledOnceWithExactly(hci.setLeEventMask);
-      assert.calledOnceWithExactly(hci.readLocalVersion);
-      assert.calledOnceWithExactly(hci.writeLeHostSupported);
-      assert.calledOnceWithExactly(hci.readLeHostSupported);
-      assert.calledOnceWithExactly(hci.readLeBufferSize);
-      assert.calledOnceWithExactly(hci.readBdAddr);
-      assert.calledOnceWithExactly(hci.setCodedPhySupport);
+      assert.calledOnceWithExactly(hci.readLeSupportedFeatures);
 
       assert.notCalled(hci._socket.removeAllListeners);
       assert.notCalled(hci.init);
@@ -228,11 +220,6 @@ describe('hci-socket hci', () => {
   it('should write codedPhySupport command', () => {
     hci.setCodedPhySupport();
     assert.calledOnceWithExactly(hci._socket.write, Buffer.from([0x01, 0x31, 0x20, 0x03, 0x00, 0x05, 0x05]));
-  });
-
-  it('should write randomMAC command', () => {
-    hci.setRandomMAC();
-    assert.calledOnceWithExactly(hci._socket.write, Buffer.from([0x01, 0x05, 0x20, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x00]));
   });
 
   it('should setSocketFilter', () => {
@@ -268,6 +255,50 @@ describe('hci-socket hci', () => {
   it('should readBdAddr', () => {
     hci.readBdAddr();
     assert.calledOnceWithExactly(hci._socket.write, Buffer.from([1, 9, 0x10, 0]));
+  });
+
+  describe('setAddress', () => {
+    it('should write vendor specific (Linux Foundation) command based on read local version response', () => {
+      hci.readBdAddr = sinon.spy();
+      hci.setScanEnabled = sinon.spy();
+      hci.setScanParameters = sinon.spy();
+
+      const cmd = 4097;
+      const status = 0;
+      // hciVer=12, hciRev=0, lmpVer=12, manufacturer=1521, lmpSubVer=65535
+      const result = Buffer.from([0x0C, 0x00, 0x00, 0x0C, 0xF1, 0x05, 0xFF, 0xFF]);
+
+      hci.processCmdCompleteEvent(cmd, status, result);
+
+      hci.setAddress('11:22:33:44:55:66');
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([0x01, 0x06, 0xfc, 0x06, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11]));
+    });
+
+    it('should write vendor specific (Ericsson) command based on manufacturer value (', () => {
+      hci._manufacturer = 0;
+      hci.readBdAddr = sinon.spy();
+      hci.setAddress('11:22:33:44:55:66');
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([0x01, 0x0d, 0xfc, 0x06, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11]));
+    });
+
+    it('should write vendor specific (Texas Instrument) command based on manufacturer value', () => {
+      hci._manufacturer = 13;
+      hci.readBdAddr = sinon.spy();
+      hci.setAddress('11:22:33:44:55:66');
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([0x01, 0x06, 0xfc, 0x06, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11]));
+    });
+
+    it('should write vendor specific (BCM) command based on manufacturer value', () => {
+      hci._manufacturer = 15;
+      hci.readBdAddr = sinon.spy();
+      hci.setAddress('11:22:33:44:55:66');
+      assert.calledOnceWithExactly(hci._socket.write, Buffer.from([0x01, 0x01, 0xfc, 0x06, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11]));
+    });
+
+    it('should not write vendor specific command', () => {
+      hci.setAddress('11:22:33:44:55:66');
+      assert.notCalled(hci._socket.write);
+    });
   });
 
   describe('setLeEventMask', () => {
@@ -655,6 +686,81 @@ describe('hci-socket hci', () => {
       should(hci._aclConnections).have.keys(4660, 4661);
       should(hci._aclConnections.get(4660)).deepEqual({ pending: 3 });
       should(hci._aclConnections.get(4661)).deepEqual({ pending: 2 });
+
+      describe('LE_READ_LOCAL_SUPPORTED_FEATURES', () => {
+        beforeEach(() => {
+          hci.setCodedPhySupport = sinon.spy();
+          hci.setEventMask = sinon.spy();
+          hci.setLeEventMask = sinon.spy();
+          hci.readLocalVersion = sinon.spy();
+          hci.writeLeHostSupported = sinon.spy();
+          hci.readLeHostSupported = sinon.spy();
+          hci.readLeBufferSize = sinon.spy();
+          hci.readBdAddr = sinon.spy();
+        });
+      
+        it('should not process on error status', () => {
+          const cmd = 8195;
+          const status = 1;
+          const result = Buffer.from([0x00, 0x00, 0x00, 0x00]);
+      
+          hci.processCmdCompleteEvent(cmd, status, result);
+      
+          // Verify no methods were called
+          assert.notCalled(hci.setCodedPhySupport);
+          assert.notCalled(hci.setEventMask);
+          assert.notCalled(hci.setLeEventMask);
+          assert.notCalled(hci.readLocalVersion);
+          assert.notCalled(hci.writeLeHostSupported);
+          assert.notCalled(hci.readLeHostSupported);
+          assert.notCalled(hci.readLeBufferSize);
+          assert.notCalled(hci.readBdAddr);
+      
+          should(hci._isExtended).equal(false);
+        });
+      
+        it('should process without extended features', () => {
+          const cmd = 8195;
+          const status = 0;
+          const result = Buffer.from([0x00, 0x00, 0x00, 0x00]); // No bits set
+      
+          hci.processCmdCompleteEvent(cmd, status, result);
+      
+          // Verify extended-specific method not called
+          assert.notCalled(hci.setCodedPhySupport);
+      
+          // Verify other methods were called
+          assert.calledOnce(hci.setEventMask);
+          assert.calledOnce(hci.setLeEventMask);
+          assert.calledOnce(hci.readLocalVersion);
+          assert.calledOnce(hci.writeLeHostSupported);
+          assert.calledOnce(hci.readLeHostSupported);
+          assert.calledOnce(hci.readLeBufferSize);
+          assert.calledOnce(hci.readBdAddr);
+      
+          should(hci._isExtended).equal(false);
+        });
+      
+        it('should process with extended features', () => {
+          const cmd = 8195;
+          const status = 0;
+          const result = Buffer.from("bd5f660000000000", "hex");
+      
+          hci.processCmdCompleteEvent(cmd, status, result);
+      
+          // Verify all methods were called including extended-specific
+          assert.calledOnce(hci.setCodedPhySupport);
+          assert.calledOnce(hci.setEventMask);
+          assert.calledOnce(hci.setLeEventMask);
+          assert.calledOnce(hci.readLocalVersion);
+          assert.calledOnce(hci.writeLeHostSupported);
+          assert.calledOnce(hci.readLeHostSupported);
+          assert.calledOnce(hci.readLeBufferSize);
+          assert.calledOnce(hci.readBdAddr);
+      
+          should(hci._isExtended).equal(true);
+        });
+      });
     });
 
     it('should only processCmdStatusEvent - HCI_EVENT_PKT / EVT_CMD_STATUS', () => {

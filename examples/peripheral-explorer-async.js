@@ -1,17 +1,32 @@
 const noble = require('../');
 
-const peripheralIdOrAddress = process.argv[2].toLowerCase();
+const directConnect = process.argv[2].toLowerCase();
+const peripheralIdOrAddress = process.argv[3].toLowerCase();
+const addressType = process.argv[4].toLowerCase() || 'random';
 
-noble.on('stateChange', async (state) => {
-  if (state === 'poweredOn') {
-    await noble.startScanningAsync([], false);
+const starTime = Date.now();
+
+async function main () {
+  try {
+    await noble.waitForPoweredOn();
+    if (directConnect === '1') {
+      const peripheral = await noble.connectAsync(peripheralIdOrAddress.replace(/:/g, ''), { addressType });
+      await explore(peripheral);
+    } else {
+      await noble.startScanningAsync();
+    }
+  } catch (error) {
+    console.error('Error:', error);
   }
-});
+}
 
 noble.on('discover', async (peripheral) => {
+  if (directConnect === '1') {
+    return;
+  }
   if ([peripheral.id, peripheral.address].includes(peripheralIdOrAddress)) {
     await noble.stopScanningAsync();
-
+    
     console.log(`Peripheral with ID ${peripheral.id} found`);
     const advertisement = peripheral.advertisement;
 
@@ -59,7 +74,9 @@ const explore = async (peripheral) => {
     process.exit(0);
   });
 
-  await peripheral.connectAsync();
+  if (peripheral.state !== 'connected') {
+    await peripheral.connectAsync();
+  }
 
   const services = await peripheral.discoverServicesAsync([]);
 
@@ -114,7 +131,9 @@ const explore = async (peripheral) => {
     }
   }
 
+  console.log(`Time taken: ${Date.now() - starTime}ms`);
   await peripheral.disconnectAsync();
+
 };
 
 process.on('SIGINT', function () {
@@ -131,3 +150,5 @@ process.on('SIGTERM', function () {
   console.log('Caught interrupt signal');
   noble.stopScanning(() => process.exit());
 });
+
+main();

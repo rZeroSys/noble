@@ -13,6 +13,15 @@
 
 import events = require("events");
 
+export interface ConnectOptions {
+  addressType?: 'public' | 'random';
+  minInterval?: number;
+  maxInterval?: number;
+  latency?: number;
+  timeout?: number;
+}
+
+export declare function waitForPoweredOn(timeout?: number): Promise<void>;
 /**
  * @deprecated
  */
@@ -25,8 +34,13 @@ export declare function startScanning(serviceUUIDs?: string[], allowDuplicates?:
 export declare function startScanningAsync(serviceUUIDs?: string[], allowDuplicates?: boolean): Promise<void>;
 export declare function stopScanning(callback?: () => void): void;
 export declare function stopScanningAsync(): Promise<void>;
+export declare function connect(peripheralUuid: string, options?: ConnectOptions, callback?: (error: Error | undefined, peripheral: Peripheral) => void): void;
+export declare function connectAsync(peripheralUuid: string, options?: ConnectOptions): Promise<Peripheral>;
 export declare function cancelConnect(peripheralUuid: string, options?: object): void;
 export declare function reset(): void;
+export declare function stop(): void;
+
+export declare function setAddress(address: string): void;
 
 export declare function on(event: "stateChange", listener: (state: string) => void): events.EventEmitter;
 export declare function on(event: "scanStart", listener: () => void): events.EventEmitter;
@@ -48,7 +62,11 @@ export declare function removeListener(event: string, listener: Function): event
 
 export declare function removeAllListeners(event?: string): events.EventEmitter;
 
-export declare var state: string;
+export var state: "unknown" | "resetting" | "unsupported" | "unauthorized" | "poweredOff" | "poweredOn";
+/**
+ * @deprecated Use `state` instead.
+ */
+export var _state: "unknown" | "resetting" | "unsupported" | "unauthorized" | "poweredOff" | "poweredOn";
 
 export var _bindings: any;
 

@@ -132,15 +132,26 @@ describe('hci-socket bindings', () => {
   });
 
   describe('connect', () => {
-    it('missing peripheral, no queue', () => {
+    it('missing peripheral, no queue, public address', () => {
       bindings._hci.createLeConn = fake.resolves(null);
 
-      bindings.connect('peripheralUuid', 'parameters');
+      bindings.connect('112233445566', { addressType: 'public' });
 
-      should(bindings._pendingConnectionUuid).eql('peripheralUuid');
+      should(bindings._pendingConnectionUuid).eql('112233445566');
 
       assert.calledOnce(bindings._hci.createLeConn);
-      assert.calledWith(bindings._hci.createLeConn, undefined, undefined, 'parameters');
+      assert.calledWith(bindings._hci.createLeConn, '11:22:33:44:55:66', 'public', { addressType: 'public' });
+    });
+
+    it('missing peripheral, no queue, random address', () => {
+      bindings._hci.createLeConn = fake.resolves(null);
+
+      bindings.connect('f32233445566', { addressType: 'random' });
+
+      should(bindings._pendingConnectionUuid).eql('f32233445566');
+
+      assert.calledOnce(bindings._hci.createLeConn);
+      assert.calledWith(bindings._hci.createLeConn, 'f3:22:33:44:55:66', 'random', { addressType: 'random' });
     });
 
     it('existing peripheral, no queue', () => {
@@ -268,22 +279,28 @@ describe('hci-socket bindings', () => {
     assert.calledTwice(process.on);
   });
 
-  describe('onExit', () => {
+  describe('stop', () => {
     it('no handles', () => {
       bindings._gap.stopScanning = fake.resolves(null);
+      bindings._hci.reset = fake.resolves(null);
+      bindings._hci.stop = fake.resolves(null);
 
-      bindings.onExit();
+      bindings.stop();
 
       assert.calledOnce(bindings._gap.stopScanning);
+      assert.calledOnce(bindings._hci.reset);
+      assert.calledOnce(bindings._hci.stop);
     });
 
     it('with handles', () => {
       bindings._gap.stopScanning = fake.resolves(null);
       bindings._hci.disconnect = fake.resolves(null);
+      bindings._hci.reset = fake.resolves(null);
+      bindings._hci.stop = fake.resolves(null);
 
       bindings._aclStreams = [1, 2, 3];
 
-      bindings.onExit();
+      bindings.stop();
 
       assert.calledOnce(bindings._gap.stopScanning);
       assert.calledThrice(bindings._hci.disconnect);

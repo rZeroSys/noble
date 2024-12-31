@@ -1,16 +1,44 @@
 # ![noble](assets/noble-logo.png)
 
-[![npm version](https://badgen.net/npm/v/@abandonware/noble)](https://www.npmjs.com/package/@abandonware/noble)
-[![npm downloads](https://badgen.net/npm/dt/@abandonware/noble)](https://www.npmjs.com/package/@abandonware/noble)
-[![Build Status](https://travis-ci.org/abandonware/noble.svg?branch=master)](https://travis-ci.org/abandonware/noble)
-[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/abandonware/noble?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge) [![OpenCollective](https://opencollective.com/noble/backers/badge.svg)](#backers)
-[![OpenCollective](https://opencollective.com/noble/sponsors/badge.svg)](#sponsors)
+[![npm version](https://badgen.net/npm/v/@stoprocent/noble)](https://www.npmjs.com/package/@stoprocent/noble)
+[![npm downloads](https://badgen.net/npm/dt/@stoprocent/noble)](https://www.npmjs.com/package/@stoprocent/noble)
+[![Build Status](https://travis-ci.org/stoprocent/noble.svg?branch=master)](https://travis-ci.org/stoprocent/noble)
 
 A Node.js BLE (Bluetooth Low Energy) central module.
 
-Want to implement a peripheral? Check out [bleno](https://github.com/abandonware/bleno).
+Want to implement a peripheral? Check out [@stoprocent/bleno](https://github.com/stoprocent/bleno).
 
-__Note:__ macOS / Mac OS X, Linux, FreeBSD and Windows are currently the only supported OSes.
+## About This Fork
+
+This fork of `noble` was created to introduce several key improvements and new features:
+
+1. **HCI UART Support**: This version enables HCI UART communication through the `@stoprocent/node-bluetooth-hci-socket` dependency, allowing more flexible use of Bluetooth devices across platforms.
+   
+2. **macOS Native Bindings Fix**: I have fixed the native bindings for macOS, ensuring better compatibility and performance on Apple devices.
+
+3. **Windows Native Bindings Fix**: I have fixed the native bindings for Windows, adding support for `Service Data` from advertisements.
+
+4. **New Features**: 
+  - A `setAddress(...)` function has been added, allowing users to set the MAC address of the central device. 
+  - A `connect(...)/connectAsync(...)` function has been added, allowing users to connect directly to specific device by address/identifier without a need to prior scan. 
+  - A `waitForPoweredOn(...)` function to wait for the adapter to be powered on in await/async functions.
+  - Additionally, I plan to add raw L2CAP channel support, enhancing low-level Bluetooth communication capabilities.
+
+If you appreciate these enhancements and the continued development of this project, please consider supporting my work. 
+
+[![Buy me a coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/stoprocent)
+
+## Install
+
+```sh
+npm install @stoprocent/noble
+```
+
+## Usage
+
+```javascript
+const noble = require('@stoprocent/noble');
+```
 
 ## Documentation
 
@@ -24,14 +52,16 @@ __Note:__ macOS / Mac OS X, Linux, FreeBSD and Windows are currently the only su
 
 ```javascript
 // Read the battery level of the first found peripheral exposing the Battery Level characteristic
+const noble = require('../');
 
-const noble = require('@abandonware/noble');
-
-noble.on('stateChange', async (state) => {
-  if (state === 'poweredOn') {
+async function run() {
+  try {
+    await noble.waitForPoweredOn();
     await noble.startScanningAsync(['180f'], false);
+  } catch (error) {
+    console.error(error);
   }
-});
+}
 
 noble.on('discover', async (peripheral) => {
   await noble.stopScanningAsync();
@@ -44,11 +74,14 @@ noble.on('discover', async (peripheral) => {
   await peripheral.disconnectAsync();
   process.exit(0);
 });
+
+run();
+
 ```
 ## Use Noble With BLE5 Extended Features With HCI 
 
 ```javascript
-const noble = require('@abandonware/noble/with-custom-binding')({extended: true});
+const noble = require('@stoprocent/noble/with-custom-binding')({extended: true});
 
 ```
 
@@ -64,6 +97,7 @@ const noble = require('@abandonware/noble/with-custom-binding')({active: true});
 ## Installation
 
 * [Prerequisites](#prerequisites)
+  * [UART](#uart)
   * [OS X](#os-x)
   * [Linux](#linux)
     * [Ubuntu, Debian, Raspbian](#ubuntu-debian-raspbian)
@@ -75,6 +109,42 @@ const noble = require('@abandonware/noble/with-custom-binding')({active: true});
 * [Installing and using the package](#installing-and-using-the-package)
 
 ### Prerequisites
+
+#### UART (Any OS)
+
+Please refer to [https://github.com/stoprocent/node-bluetooth-hci-socket#uartserial-any-os](https://github.com/stoprocent/node-bluetooth-hci-socket#uartserial-any-os)
+
+##### Example 1 (UART port spcified as enviromental variable)
+
+```bash
+$ export BLUETOOTH_HCI_SOCKET_UART_PORT=/dev/tty...
+$ export BLUETOOTH_HCI_SOCKET_UART_BAUDRATE=1000000
+```
+
+__NOTE:__ `BLUETOOTH_HCI_SOCKET_UART_BAUDRATE` defaults to `1000000` so only needed if different.
+
+```javascript
+const noble = require('@stoprocent/noble');
+```
+
+##### Example 2 (UART port spcified in `bindParams`)
+
+```bash
+$ export BLUETOOTH_HCI_SOCKET_FORCE_UART=1
+```
+
+```javascript
+const noble = require('@stoprocent/noble/with-custom-binding') ( { 
+  bindParams: { 
+    uart: { 
+      port: '/dev/tty...', 
+      baudRate: 1000000
+    } 
+  } 
+} );
+```
+
+__NOTE:__ There is a [UART code example](examples/uart-bind-params.js) in the `/examples` directory.
 
 #### OS X
 
@@ -165,7 +235,7 @@ Make sure your container runs with `--network=host` options and all specific env
 ### Installing and using the package
 
 ```sh
-npm install @abandonware/noble
+npm install @stoprocent/noble
 ```
 
 In Windows OS add your custom hci-usb dongle to the process env
@@ -175,7 +245,7 @@ set BLUETOOTH_HCI_SOCKET_USB_PID=xxx
 ```
 
 ```javascript
-const noble = require('@abandonware/noble');
+const noble = require('@stoprocent/noble');
 ```
 
 ## API docs
@@ -212,10 +282,12 @@ API structure:
 
 * [Scanning and discovery](#scanning-and-discovery)
   * [_Event: Adapter state changed_](#event-adapter-state-changed)
+  * [Set address](#set-address)
   * [Start scanning](#start-scanning)
   * [_Event: Scanning started_](#event-scanning-started)
   * [Stop scanning](#stop-scanning)
   * [_Event: Scanning stopped_](#event-scanning-stopped)
+  * [Connect by UUID / Address](#connect-by-uuid)
   * [_Event: Peripheral discovered_](#event-peripheral-discovered)
   * [_Event: Warning raised_](#event-warning-raised)
 * [Reset device](#reset-device)
@@ -274,6 +346,14 @@ noble.on('stateChange', callback(state));
 * `poweredOff`
 * `poweredOn`
 
+#### Set address
+
+```javascript
+noble.setAddress('00:11:22:33:44:55'); // set adapter's mac address
+```
+__NOTE:__ Curently this feature is only supported on HCI as it's using vendor specific commands. Source of the commands is based on the [BlueZ bdaddr.c](https://github.com/pauloborges/bluez/blob/master/tools/bdaddr.c).
+__NOTE:__ `noble.state` must be `poweredOn` before address can be set. `noble.on('stateChange', callback(state));` can be used to listen for state change events.
+
 #### Start scanning
 
 ```javascript
@@ -317,6 +397,54 @@ noble.on('scanStop', callback);
 The event is emitted when:
 * Scanning is stopped
 * Another application stops scanning
+
+#### Connect by UUID
+
+The `connect` function is used to establish a Bluetooth Low Energy connection to a peripheral device using its UUID. It provides both callback-based and Promise-based interfaces.
+
+##### Usage
+
+```typescript
+// Callback-based usage
+connect(peripheralUuid: string, options?: object, callback?: (error?: Error, peripheral: Peripheral) => void): void;
+
+// Promise-based usage
+connectAsync(peripheralUuid: string, options?: object): Promise<Peripheral>;
+```
+
+##### Parameters
+- `peripheralUuid`: The UUID of the peripheral to connect to.
+- `options`: Optional parameters for the connection (this may include connection interval, latency, supervision timeout, etc.).
+- `callback`: An optional callback that returns an error or the connected peripheral object.
+
+##### Description
+The `connect` function initiates a connection to a BLE peripheral. The function immediately returns, and the actual connection result is provided asynchronously via the callback or Promise. If the peripheral is successfully connected, a `Peripheral` object representing the connected device is provided.
+
+##### Example
+
+```javascript
+const noble = require('@stoprocent/noble');
+
+// Using callback
+noble.connect('1234567890abcdef', {}, (error, peripheral) => {
+  if (error) {
+    console.error('Connection error:', error);
+  } else {
+    console.log('Connected to:', peripheral.uuid);
+  }
+});
+
+// Using async/await
+async function connectPeripheral() {
+  try {
+    const peripheral = await noble.connectAsync('1234567890abcdef');
+    console.log('Connected to:', peripheral.uuid);
+  } catch (error) {
+    console.error('Connection error:', error);
+  }
+}
+connectPeripheral();
+```
 
 
 #### _Event: Peripheral discovered_
@@ -647,7 +775,7 @@ descriptor.once('valueWrite');
 By default, noble will select appropriate Bluetooth device bindings based on your platform. You can provide custom bindings using the `with-bindings` module.
 
 ```javascript
-var noble = require('@abandonware/noble/with-bindings')(require('./my-custom-bindings'));
+var noble = require('@stoprocent/noble/with-bindings')(require('./my-custom-bindings'));
 ```
 
 ### Running without root/sudo (Linux-specific)
@@ -681,8 +809,8 @@ sudo NOBLE_HCI_DEVICE_ID=1 node <your file>.js
 If you are using multiple HCI devices in one setup you can run two instances of noble with different binding configurations by initializing them seperatly in code:
 
 ```
-const HCIBindings = require('@abandonware/noble/lib/hci-socket/bindings');
-const Noble = require('@abandonware/noble/lib/noble');
+const HCIBindings = require('@stoprocent/noble/lib/hci-socket/bindings');
+const Noble = require('@stoprocent/noble/lib/noble');
 
 const params = {
   deviceId: 0,
@@ -738,90 +866,8 @@ Intel Dual Band Wireless-AC 7260 (Intel Corporation Wireless 7260 (rev 73)): `Er
 
 You need to stop scanning before trying to connect in order to solve this issue.
 
-## Backers
-
-Support us with a monthly donation and help us continue our activities. [[Become a backer](https://opencollective.com/noble#backer)]
-
-<a href="https://opencollective.com/noble/backer/0/website" target="_blank"><img src="https://opencollective.com/noble/backer/0/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/1/website" target="_blank"><img src="https://opencollective.com/noble/backer/1/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/2/website" target="_blank"><img src="https://opencollective.com/noble/backer/2/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/3/website" target="_blank"><img src="https://opencollective.com/noble/backer/3/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/4/website" target="_blank"><img src="https://opencollective.com/noble/backer/4/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/5/website" target="_blank"><img src="https://opencollective.com/noble/backer/5/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/6/website" target="_blank"><img src="https://opencollective.com/noble/backer/6/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/7/website" target="_blank"><img src="https://opencollective.com/noble/backer/7/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/8/website" target="_blank"><img src="https://opencollective.com/noble/backer/8/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/9/website" target="_blank"><img src="https://opencollective.com/noble/backer/9/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/10/website" target="_blank"><img src="https://opencollective.com/noble/backer/10/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/11/website" target="_blank"><img src="https://opencollective.com/noble/backer/11/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/12/website" target="_blank"><img src="https://opencollective.com/noble/backer/12/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/13/website" target="_blank"><img src="https://opencollective.com/noble/backer/13/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/14/website" target="_blank"><img src="https://opencollective.com/noble/backer/14/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/15/website" target="_blank"><img src="https://opencollective.com/noble/backer/15/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/16/website" target="_blank"><img src="https://opencollective.com/noble/backer/16/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/17/website" target="_blank"><img src="https://opencollective.com/noble/backer/17/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/18/website" target="_blank"><img src="https://opencollective.com/noble/backer/18/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/19/website" target="_blank"><img src="https://opencollective.com/noble/backer/19/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/20/website" target="_blank"><img src="https://opencollective.com/noble/backer/20/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/21/website" target="_blank"><img src="https://opencollective.com/noble/backer/21/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/22/website" target="_blank"><img src="https://opencollective.com/noble/backer/22/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/23/website" target="_blank"><img src="https://opencollective.com/noble/backer/23/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/24/website" target="_blank"><img src="https://opencollective.com/noble/backer/24/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/25/website" target="_blank"><img src="https://opencollective.com/noble/backer/25/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/26/website" target="_blank"><img src="https://opencollective.com/noble/backer/26/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/27/website" target="_blank"><img src="https://opencollective.com/noble/backer/27/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/28/website" target="_blank"><img src="https://opencollective.com/noble/backer/28/avatar.svg"></a>
-<a href="https://opencollective.com/noble/backer/29/website" target="_blank"><img src="https://opencollective.com/noble/backer/29/avatar.svg"></a>
-
-## Sponsors
-
-Become a sponsor and get your logo on our README on Github with a link to your site. [[Become a sponsor](https://opencollective.com/noble#sponsor)]
-
-<a href="https://opencollective.com/noble/sponsor/0/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/0/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/1/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/1/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/2/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/2/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/3/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/3/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/4/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/4/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/5/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/5/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/6/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/6/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/7/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/7/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/8/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/8/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/9/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/9/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/10/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/10/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/11/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/11/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/12/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/12/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/13/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/13/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/14/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/14/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/15/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/15/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/16/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/16/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/17/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/17/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/18/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/18/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/19/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/19/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/20/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/20/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/21/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/21/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/22/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/22/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/23/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/23/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/24/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/24/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/25/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/25/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/26/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/26/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/27/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/27/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/28/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/28/avatar.svg"></a>
-<a href="https://opencollective.com/noble/sponsor/29/website" target="_blank"><img src="https://opencollective.com/noble/sponsor/29/avatar.svg"></a>
-
 ## Useful links
 
  * [Bluetooth Development Portal](http://developer.bluetooth.org)
    * [GATT Specifications](https://www.bluetooth.com/specifications/gatt/)
  * [Bluetooth: ATT and GATT](http://epx.com.br/artigos/bluetooth_gatt.php)
-
-## License
-
-Copyright (C) 2015 Sandeep Mistry <sandeep.mistry@gmail.com>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-[![Analytics](https://ga-beacon.appspot.com/UA-56089547-1/sandeepmistry/noble?pixel)](https://github.com/igrigorik/ga-beacon)

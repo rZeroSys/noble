@@ -4,19 +4,21 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
+#include <winrt/Windows.Devices.Bluetooth.GenericAttributeProfile.h>
 
 using namespace winrt::Windows::Devices::Bluetooth::Advertisement;
 using winrt::Windows::Devices::Bluetooth::BluetoothLEDevice;
 using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattCharacteristic;
 using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattDescriptor;
 using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattDeviceService;
+using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattSession;
 
 #include "winrt/Windows.Devices.Bluetooth.h"
 
 #include <string>
 #include <optional>
 
-#include "peripheral.h"
+#include "Peripheral.h"
 #include "winrt_guid.h"
 
 class CachedCharacteristic
@@ -68,6 +70,9 @@ public:
     uint64_t bluetoothAddress;
     std::optional<BluetoothLEDevice> device;
     winrt::event_token connectionToken;
+    std::optional<GattSession> gattSession;
+    winrt::event_token maxPduSizeChangedToken;
+    std::unordered_map<winrt::guid, CachedService> cachedServices;
 
 private:
     void GetServiceFromDevice(winrt::guid serviceUuid,
@@ -78,5 +83,5 @@ private:
     void
     GetDescriptorFromCharacteristic(GattCharacteristic characteristic, winrt::guid descriptorUuid,
                                     std::function<void(std::optional<GattDescriptor>)> callback);
-    std::unordered_map<winrt::guid, CachedService> cachedServices;
+    void ProcessServiceData(const BluetoothLEAdvertisementDataSection& ds, size_t uuidSize);
 };

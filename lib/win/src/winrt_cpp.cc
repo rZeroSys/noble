@@ -3,7 +3,7 @@
 #include <sstream>
 #include <iomanip>
 
-#include <winrt\Windows.Devices.Bluetooth.h>
+#include <winrt/Windows.Devices.Bluetooth.h>
 #include <winrt/Windows.Foundation.Collections.h>
 
 std::string ws2s(const wchar_t* wstr)
@@ -44,7 +44,14 @@ std::string toStr(winrt::guid uuid)
         {
             auto i = ref.Value();
             std::ostringstream ret;
-            ret << std::hex << i;
+            // Ensure proper width for short IDs to preserve leading zeros
+            if (i <= 0xFFFF) {
+                ret << std::hex << std::setfill('0') << std::setw(4) << i;
+            } else if (i <= 0xFFFFFFFF) {
+                ret << std::hex << std::setfill('0') << std::setw(8) << i;
+            } else {
+                ret << std::hex << i;
+            }
             return ret.str();
         }
     }

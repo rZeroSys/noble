@@ -1,89 +1,132 @@
-//
-//  ble_manager.mm
-//  noble-mac-native
-//
-//  Created by Georg Vienna on 28.08.18.
-//
 #include "ble_manager.h"
+#include "objc_cpp.h"
+#include "Peripheral.h"
 
 #import <Foundation/Foundation.h>
 
-#include "objc_cpp.h"
+@interface BLEManager ()
+- (void)updateMtuForPeripheral:(CBPeripheral*) peripheral;
+@end
 
 @implementation BLEManager
-- (instancetype)init: (const Napi::Value&) receiver with: (const Napi::Function&) callback {
+
+- (instancetype)init: (const Napi::Value&) receiver with: (const Napi::Function&) callback
+{
     if (self = [super init]) {
         pendingRead = false;
         // wrap cb before creating the CentralManager as it may call didUpdateState immediately
         self->emit.Wrap(receiver, callback);
         self.dispatchQueue = dispatch_queue_create("CBqueue", 0);
         self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:self.dispatchQueue];
+        self.discovered = [NSMutableSet set];
         self.peripherals = [NSMutableDictionary dictionaryWithCapacity:10];
+        self.mtus = [NSMutableDictionary dictionaryWithCapacity:10];
     }
     return self;
 }
 
-- (void)centralManagerDidUpdateState:(CBCentralManager *)central {
+- (void)updateMtuForPeripheral:(CBPeripheral*) peripheral {
+    NSUInteger mtu = [peripheral maximumWriteValueLengthForType:CBCharacteristicWriteWithoutResponse];
+    NSNumber *mtuNumber = [self.mtus objectForKey: peripheral.identifier];
+    if (!mtuNumber || [mtuNumber unsignedIntegerValue] != mtu) {
+        emit.MTU(getUuid(peripheral), mtu);
+        [self.mtus setObject:[NSNumber numberWithInt:mtu] forKey: peripheral.identifier];
+    }
+}
+
+- (void)centralManagerDidUpdateState:(CBCentralManager *)central 
+{
+    if (central.state != self.lastState && self.lastState == CBManagerStatePoweredOff && central.state == CBManagerStatePoweredOn) {
+        [self.peripherals enumerateKeysAndObjectsUsingBlock:^(id key, CBPeripheral* peripheral, BOOL *stop) {
+            if (peripheral.state == CBPeripheralStateConnected) {
+                [self.centralManager cancelPeripheralConnection:peripheral];
+            }
+        }];
+    }
+
+    self.lastState = central.state;
     auto state = stateToString(central.state);
     emit.RadioState(state);
 }
 
-- (void)scan: (NSArray<NSString*> *)serviceUUIDs allowDuplicates: (BOOL)allowDuplicates {
+- (void)scan:(NSArray<NSString*> *)serviceUUIDs allowDuplicates:(BOOL)allowDuplicates {
+    [self.discovered removeAllObjects];
     NSMutableArray* advServicesUuid = [NSMutableArray arrayWithCapacity:[serviceUUIDs count]];
     [serviceUUIDs enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
         [advServicesUuid addObject:[CBUUID UUIDWithString:obj]];
     }];
+    
     NSDictionary *options = @{CBCentralManagerScanOptionAllowDuplicatesKey:[NSNumber numberWithBool:allowDuplicates]};
     [self.centralManager scanForPeripheralsWithServices:advServicesUuid options:options];
     emit.ScanState(true);
 }
 
-- (void)stopScan {
+- (void)stopScan 
+{
     [self.centralManager stopScan];
     emit.ScanState(false);
 }
 
-- (void) centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral advertisementData:(NSDictionary<NSString *,id> *)advertisementData RSSI:(NSNumber *)RSSI {
+- (void) centralManager:(CBCentralManager *)central 
+  didDiscoverPeripheral:(CBPeripheral *)peripheral 
+      advertisementData:(NSDictionary<NSString *,id> *)advertisementData 
+                   RSSI:(NSNumber *)RSSI 
+{
     std::string uuid = getUuid(peripheral);
+    [self.discovered addObject:getNSUuid(peripheral)];
 
     Peripheral p;
     p.address = getAddress(uuid, &p.addressType);
+    
     IF(NSNumber*, connect, [advertisementData objectForKey:CBAdvertisementDataIsConnectable]) {
         p.connectable = [connect boolValue];
     }
+    
     IF(NSString*, dataLocalName, [advertisementData objectForKey:CBAdvertisementDataLocalNameKey]) {
-        p.name = std::make_pair([dataLocalName UTF8String], true);
+        p.name = std::string([dataLocalName UTF8String]);
     }
-    if(!std::get<1>(p.name)) {
+    
+    if (!p.name) {
         IF(NSString*, name, [peripheral name]) {
-            p.name = std::make_pair([name UTF8String], true);
+            p.name = std::string([name UTF8String]);
         }
     }
+    
     IF(NSNumber*, txLevel, [advertisementData objectForKey:CBAdvertisementDataTxPowerLevelKey]) {
-        p.txPowerLevel = std::make_pair([txLevel intValue], true);
+        p.txPowerLevel = [txLevel intValue];
     }
+    
     IF(NSData*, data, [advertisementData objectForKey:CBAdvertisementDataManufacturerDataKey]) {
         const UInt8* bytes = (UInt8 *)[data bytes];
-        std::get<0>(p.manufacturerData).assign(bytes, bytes+[data length]);
-        std::get<1>(p.manufacturerData) = true;
+        Data manufacturerData;
+        manufacturerData.assign(bytes, bytes + [data length]);
+        p.manufacturerData = manufacturerData;
     }
+    
     IF(NSDictionary*, dictionary, [advertisementData objectForKey:CBAdvertisementDataServiceDataKey]) {
+        std::vector<std::pair<std::string, Data>> serviceData;
         for (CBUUID* key in dictionary) {
             IF(NSData*, value, dictionary[key]) {
                 auto serviceUuid = [[key UUIDString] UTF8String];
                 Data sData;
                 const UInt8* bytes = (UInt8 *)[value bytes];
-                sData.assign(bytes, bytes+[value length]);
-                std::get<0>(p.serviceData).push_back(std::make_pair(serviceUuid, sData));
+                sData.assign(bytes, bytes + [value length]);
+                serviceData.push_back(std::make_pair(serviceUuid, sData));
             }
         }
-        std::get<1>(p.serviceData) = true;
-    }
-    IF(NSArray*, services, [advertisementData objectForKey:CBAdvertisementDataServiceUUIDsKey]) {
-        for (CBUUID* service in services) {
-            std::get<0>(p.serviceUuids).push_back([[service UUIDString] UTF8String]);
+        if (!serviceData.empty()) {
+            p.serviceData = serviceData;
         }
-        std::get<1>(p.serviceUuids) = true;
+    }
+    
+    IF(NSArray*, services, [advertisementData objectForKey:CBAdvertisementDataServiceUUIDsKey]) {
+        std::vector<std::string> serviceUuids;
+        for (CBUUID* service in services) {
+            serviceUuids.push_back([[service UUIDString] UTF8String]);
+        }
+        if (!serviceUuids.empty()) {
+            p.serviceUuids = serviceUuids;
+        }
     }
 
     int rssi = [RSSI intValue];
@@ -93,7 +136,11 @@
 - (BOOL)connect:(NSString*) uuid {
     CBPeripheral *peripheral = [self.peripherals objectForKey:uuid];
     if(!peripheral) {
-        NSArray* peripherals = [self.centralManager retrievePeripheralsWithIdentifiers:@[[[NSUUID alloc] initWithUUIDString:uuid]]];
+        NSUUID *identifier = [[NSUUID alloc] initWithUUIDString:uuid];
+        if (!identifier) {
+            return NO;
+        }
+        NSArray* peripherals = [self.centralManager retrievePeripheralsWithIdentifiers:@[identifier]];
         peripheral = [peripherals firstObject];
         if(peripheral) {
             peripheral.delegate = self;
@@ -108,8 +155,21 @@
 }
 
 - (void) centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral {
+    // Check if peripheral was known
+    if ([self.discovered containsObject:getNSUuid(peripheral)] == false) {
+        // The peripheral was connected without being discovered by this app instance
+        // Optionally simulate discovery using dummy or last known advertisement data and RSSI
+        NSDictionary<NSString *, id> *advertisementData = @{ }; // Placeholder, use actual last known data if available
+        NSNumber *RSSI = @127; // Placeholder RSSI, use actual last known value if available
+
+        // Simulate discovery handling
+        [self centralManager:central didDiscoverPeripheral:peripheral advertisementData:advertisementData RSSI:RSSI];
+    }
+    
     std::string uuid = getUuid(peripheral);
     emit.Connected(uuid, "");
+    [self updateMtuForPeripheral:peripheral];
+    
 }
 
 - (void) centralManager:(CBCentralManager *)central didFailToConnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error {
@@ -140,17 +200,18 @@
     return NO;
 }
 
-- (void)peripheralDidUpdateRSSI:(CBPeripheral *)peripheral error:(NSError *)error {
+- (void) peripheral:(CBPeripheral *) peripheral 
+        didReadRSSI:(NSNumber *) RSSI 
+              error:(NSError *) error
+{
     std::string uuid = getUuid(peripheral);
-    NSNumber* rssi = peripheral.RSSI;
-    if(!error && rssi) {
-        emit.RSSI(uuid, [rssi longValue]);
-    }
+    int16_t rssi = [RSSI intValue];
+    emit.RSSI(uuid, rssi, error ? error.localizedDescription.UTF8String : "");
 }
 
 #pragma mark - Services
 
--(BOOL) discoverServices:(NSString*) uuid serviceUuids:(NSArray<NSString*>*) services {
+- (BOOL)discoverServices:(NSString*) uuid serviceUuids:(NSArray<NSString*>*) services {
     IF(CBPeripheral*, peripheral, [self.peripherals objectForKey:uuid]) {
         NSMutableArray* servicesUuid = nil;
         if(services) {
@@ -165,10 +226,11 @@
     return NO;
 }
 
-- (void) peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error {
+- (void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error {
     std::string uuid = getUuid(peripheral);
     std::vector<std::string> services = getServices(peripheral.services);
-    emit.ServicesDiscovered(uuid, services);
+    [self updateMtuForPeripheral:peripheral];
+    emit.ServicesDiscovered(uuid, services, error ? error.localizedDescription.UTF8String : "");
 }
 
 - (BOOL)discoverIncludedServices:(NSString*) uuid forService:(NSString*) serviceUuid services:(NSArray<NSString*>*) serviceUuids {
@@ -192,7 +254,7 @@
     std::string uuid = getUuid(peripheral);
     auto serviceUuid = [[service.UUID UUIDString] UTF8String];
     std::vector<std::string> services = getServices(service.includedServices);
-    emit.IncludedServicesDiscovered(uuid, serviceUuid, services);
+    emit.IncludedServicesDiscovered(uuid, serviceUuid, services, error ? error.localizedDescription.UTF8String : "");
 }
 
 #pragma mark - Characteristics
@@ -201,7 +263,7 @@
     IF(CBPeripheral *, peripheral, [self.peripherals objectForKey:uuid]) {
         IF(CBService*, service, [self getService:peripheral service:serviceUuid]) {
             NSMutableArray* characteristicsUuid = nil;
-            if(characteristics) {
+            if([characteristics count] > 0) {
                 characteristicsUuid = [NSMutableArray arrayWithCapacity:[characteristics count]];
                 [characteristics enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
                     [characteristicsUuid addObject:[CBUUID UUIDWithString:obj]];
@@ -218,7 +280,8 @@
     std::string uuid = getUuid(peripheral);
     std::string serviceUuid = std::string([service.UUID.UUIDString UTF8String]);
     auto characteristics = getCharacteristics(service.characteristics);
-    emit.CharacteristicsDiscovered(uuid, serviceUuid, characteristics);
+    [self updateMtuForPeripheral:peripheral];
+    emit.CharacteristicsDiscovered(uuid, serviceUuid, characteristics, error ? error.localizedDescription.UTF8String : "");
 }
 
 - (BOOL)read:(NSString*) uuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid {
@@ -241,7 +304,7 @@
     data.assign(bytes, bytes+[characteristic.value length]);
     bool isNotification = !pendingRead && characteristic.isNotifying;
     pendingRead = false;
-    emit.Read(uuid, serviceUuid, characteristicUuid, data, isNotification);
+    emit.Read(uuid, serviceUuid, characteristicUuid, data, isNotification, error ? error.localizedDescription.UTF8String : "");
 }
 
 - (BOOL)write:(NSString*) uuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid data:(NSData*) data withoutResponse:(BOOL)withoutResponse {
@@ -262,7 +325,7 @@
     std::string uuid = getUuid(peripheral);
     std::string serviceUuid = [characteristic.service.UUID.UUIDString UTF8String];
     std::string characteristicUuid = [characteristic.UUID.UUIDString UTF8String];
-    emit.Write(uuid, serviceUuid, characteristicUuid);
+    emit.Write(uuid, serviceUuid, characteristicUuid, error ? error.localizedDescription.UTF8String : "");
 }
 
 - (BOOL)notify:(NSString*) uuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid on:(BOOL)on {
@@ -279,7 +342,7 @@
     std::string uuid = getUuid(peripheral);
     std::string serviceUuid = [characteristic.service.UUID.UUIDString UTF8String];
     std::string characteristicUuid = [characteristic.UUID.UUIDString UTF8String];
-    emit.Notify(uuid, serviceUuid, characteristicUuid, characteristic.isNotifying);
+    emit.Notify(uuid, serviceUuid, characteristicUuid, characteristic.isNotifying, error ? error.localizedDescription.UTF8String : "");
 }
 
 #pragma mark - Descriptors
@@ -299,7 +362,7 @@
     std::string serviceUuid = [characteristic.service.UUID.UUIDString UTF8String];
     std::string characteristicUuid = [characteristic.UUID.UUIDString UTF8String];
     std::vector<std::string> descriptors = getDescriptors(characteristic.descriptors);
-    emit.DescriptorsDiscovered(uuid, serviceUuid, characteristicUuid, descriptors);
+    emit.DescriptorsDiscovered(uuid, serviceUuid, characteristicUuid, descriptors, error ? error.localizedDescription.UTF8String : "");
 }
 
 - (BOOL)readValue:(NSString*) uuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid descriptor:(NSString*) descriptorUuid {
@@ -317,13 +380,37 @@
     std::string serviceUuid = [descriptor.characteristic.service.UUID.UUIDString UTF8String];
     std::string characteristicUuid = [descriptor.characteristic.UUID.UUIDString UTF8String];
     std::string descriptorUuid = [descriptor.UUID.UUIDString UTF8String];
-    const UInt8* bytes = (UInt8 *)[descriptor.value bytes];
+    
     Data data;
-    data.assign(bytes, bytes+[descriptor.value length]);
+    
+    if (descriptor.value != nil) {
+        if ([descriptor.value isKindOfClass:[NSData class]]) {
+            // Handle NSData directly
+            NSData *valueData = (NSData *)descriptor.value;
+            const UInt8* bytes = (UInt8 *)[valueData bytes];
+            data.assign(bytes, bytes + [valueData length]);
+        } 
+        else if ([descriptor.value isKindOfClass:[NSString class]]) {
+            // Convert NSString to bytes
+            NSString *valueString = (NSString *)descriptor.value;
+            NSData *valueData = [valueString dataUsingEncoding:NSUTF8StringEncoding];
+            const UInt8* bytes = (UInt8 *)[valueData bytes];
+            data.assign(bytes, bytes + [valueData length]);
+        }
+        else if ([descriptor.value isKindOfClass:[NSNumber class]]) {
+            // Convert NSNumber to bytes
+            NSNumber *valueNumber = (NSNumber *)descriptor.value;
+            NSData *valueData = [NSData dataWithBytes:valueNumber.stringValue.UTF8String 
+                                             length:strlen(valueNumber.stringValue.UTF8String)];
+            const UInt8* bytes = (UInt8 *)[valueData bytes];
+            data.assign(bytes, bytes + [valueData length]);
+        }
+    }
+    
     IF(NSNumber*, handle, [self getDescriptorHandle:descriptor]) {
         emit.ReadHandle(uuid, [handle intValue], data);
     }
-    emit.ReadValue(uuid, serviceUuid, characteristicUuid, descriptorUuid, data);
+    emit.ReadValue(uuid, serviceUuid, characteristicUuid, descriptorUuid, data, error ? error.localizedDescription.UTF8String : "");
 }
 
 - (BOOL)writeValue:(NSString*) uuid service:(NSString*) serviceUuid characteristic:(NSString*) characteristicUuid descriptor:(NSString*) descriptorUuid data:(NSData*) data {
@@ -344,7 +431,7 @@
     IF(NSNumber*, handle, [self getDescriptorHandle:descriptor]) {
         emit.WriteHandle(uuid, [handle intValue]);
     }
-    emit.WriteValue(uuid, serviceUuid, characteristicUuid, descriptorUuid);
+    emit.WriteValue(uuid, serviceUuid, characteristicUuid, descriptorUuid, error ? error.localizedDescription.UTF8String : "");
 }
 
 - (BOOL)readHandle:(NSString*) uuid handle:(NSNumber*) handle {
@@ -433,3 +520,4 @@
 }
 
 @end
+

@@ -45,6 +45,7 @@ describe('hci-socket gap', () => {
   it('startScanning', () => {
     const hci = {
       on: sinon.spy(),
+      once: sinon.spy(),
       setScanEnabled: sinon.spy(),
       setScanParameters: sinon.spy()
     };
@@ -344,7 +345,7 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: []
+          serviceSolicitationUuids: []
         },
         rssi,
         count: 1,
@@ -375,7 +376,7 @@ describe('hci-socket gap', () => {
         manufacturerData: 'manufacturerData',
         serviceData: ['data'],
         serviceUuids: ['uuids'],
-        solicitationServiceUuids: ['solicitation']
+        serviceSolicitationUuids: []
       };
       const count = 8;
       const hasScanResponse = true;
@@ -473,7 +474,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -513,7 +513,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -553,7 +552,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -599,7 +597,6 @@ describe('hci-socket gap', () => {
             manufacturerData: undefined,
             serviceData: [],
             serviceUuids: ['201'],
-            solicitationServiceUuids: [],
             serviceSolicitationUuids: []
           },
           rssi,
@@ -646,7 +643,6 @@ describe('hci-socket gap', () => {
             manufacturerData: undefined,
             serviceData: [],
             serviceUuids: ['0f0e0d0c0b0a09080706050403020100'],
-            solicitationServiceUuids: [],
             serviceSolicitationUuids: []
           },
           rssi,
@@ -692,7 +688,6 @@ describe('hci-socket gap', () => {
             manufacturerData: undefined,
             serviceData: [],
             serviceUuids: [],
-            solicitationServiceUuids: [],
             serviceSolicitationUuids: []
           },
           rssi,
@@ -738,7 +733,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -784,7 +778,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: ['201']
         },
         rssi,
@@ -830,7 +823,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: ['0f0e0d0c0b0a09080706050403020100']
         },
         rssi,
@@ -881,7 +873,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -932,7 +923,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -983,7 +973,6 @@ describe('hci-socket gap', () => {
             }
           ],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -1029,7 +1018,6 @@ describe('hci-socket gap', () => {
           manufacturerData: undefined,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: ['4030201']
         },
         rssi,
@@ -1074,7 +1062,6 @@ describe('hci-socket gap', () => {
           manufacturerData,
           serviceData: [],
           serviceUuids: [],
-          solicitationServiceUuids: [],
           serviceSolicitationUuids: []
         },
         rssi,
@@ -1084,6 +1071,148 @@ describe('hci-socket gap', () => {
       should(gap._discoveries[address]).deepEqual(expectedDiscovery);
 
       assert.notCalled(discoverCallback);
+    });
+
+    it('should accumulate different service UUIDs and data across multiple reports', () => {
+      const hci = {
+        on: sinon.spy()
+      };
+
+      const status = 'status';
+      const type = 0x01;
+      const address = 'a:d:d:r:e:s:s';
+      const addressType = 'addressType';
+      const rssi = 'rssi';
+
+      // First report
+      const eirType1 = 0x16;
+      const serviceUuid1 = Buffer.from([0x01, 0x02]);
+      const serviceData1 = Buffer.from([0x03, 0x04]);
+      const eirLength1 = serviceUuid1.length + serviceData1.length + 1;
+      const eirLengthAndType1 = Buffer.from([eirLength1, eirType1]);
+      const eir1 = Buffer.concat([eirLengthAndType1, serviceUuid1, serviceData1]);
+
+      const gap = new Gap(hci);
+      gap.onHciLeAdvertisingReport(status, type, address, addressType, eir1, rssi);
+
+      // Second report with different UUID and data
+      const eirType2 = 0x16;
+      const serviceUuid2 = Buffer.from([0x05, 0x06]);
+      const serviceData2 = Buffer.from([0x07, 0x08]);
+      const eirLength2 = serviceUuid2.length + serviceData2.length + 1;
+      const eirLengthAndType2 = Buffer.from([eirLength2, eirType2]);
+      const eir2 = Buffer.concat([eirLengthAndType2, serviceUuid2, serviceData2]);
+
+      gap.onHciLeAdvertisingReport(status, type, address, addressType, eir2, rssi);
+
+      const expectedDiscovery = {
+        address,
+        addressType,
+        connectable: true,
+        advertisement: {
+          localName: undefined,
+          txPowerLevel: undefined,
+          manufacturerData: undefined,
+          serviceData: [
+            {
+              uuid: '0201',
+              data: serviceData1
+            },
+            {
+              uuid: '0605',
+              data: serviceData2
+            }
+          ],
+          serviceUuids: [],
+          serviceSolicitationUuids: []
+        },
+        rssi,
+        count: 2,
+        hasScanResponse: false
+      };
+      
+      should(gap._discoveries[address]).deepEqual(expectedDiscovery);
+    });
+
+    it('should overwrite service data when receiving same UUID with different data', () => {
+      const hci = {
+        on: sinon.spy()
+      };
+
+      const status = 'status';
+      const type = 0x01;
+      const address = 'a:d:d:r:e:s:s';
+      const addressType = 'addressType';
+      const rssi = 'rssi';
+
+      // First report
+      const eirType = 0x16;
+      const serviceUuid = Buffer.from([0x01, 0x02]);
+      const serviceData1 = Buffer.from([0x03, 0x04]);
+      const eirLength1 = serviceUuid.length + serviceData1.length + 1;
+      const eirLengthAndType1 = Buffer.from([eirLength1, eirType]);
+      const eir1 = Buffer.concat([eirLengthAndType1, serviceUuid, serviceData1]);
+
+      const gap = new Gap(hci);
+      gap.onHciLeAdvertisingReport(status, type, address, addressType, eir1, rssi);
+
+      // Verify first state
+      const expectedDiscovery1 = {
+        address,
+        addressType,
+        connectable: true,
+        advertisement: {
+          localName: undefined,
+          txPowerLevel: undefined,
+          manufacturerData: undefined,
+          serviceData: [
+            {
+              uuid: '0201',
+              data: serviceData1
+            }
+          ],
+          serviceUuids: [],
+          serviceSolicitationUuids: []
+        },
+        rssi,
+        count: 1,
+        hasScanResponse: false
+      };
+      
+      should(gap._discoveries[address]).deepEqual(expectedDiscovery1);
+
+      // Second report with same UUID but different data
+      const serviceData2 = Buffer.from([0x05, 0x06]);
+      const eirLength2 = serviceUuid.length + serviceData2.length + 1;
+      const eirLengthAndType2 = Buffer.from([eirLength2, eirType]);
+      const eir2 = Buffer.concat([eirLengthAndType2, serviceUuid, serviceData2]);
+
+      gap.onHciLeAdvertisingReport(status, type, address, addressType, eir2, rssi);
+
+      // Verify data was overwritten
+      const expectedDiscovery2 = {
+        address,
+        addressType,
+        connectable: true,
+        advertisement: {
+          localName: undefined,
+          txPowerLevel: undefined,
+          manufacturerData: undefined,
+          serviceData: [
+            {
+              uuid: '0201',
+              data: serviceData2
+            }
+          ],
+          serviceUuids: [],
+          serviceSolicitationUuids: []
+        },
+        rssi,
+        count: 2,
+        hasScanResponse: false
+      };
+      
+      should(gap._discoveries[address]).deepEqual(expectedDiscovery2);
     });
   });
 
